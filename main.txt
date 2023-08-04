@@ -1,0 +1,65 @@
+import json
+import boto3
+from io import StringIO
+
+def validate_and_process_line(line):
+    fields = line.split(';')
+    if len(fields) != 9:
+        return {"inconsistencias": [{"codigo_inconsistencia": "P003"}]}
+
+    competencia, cnpjempregador, cpftrabalhador, cpfbeneficiario, valorpensao, tipoenvio, produto, plano, _ = fields
+    try:
+        valorpensao = float(valorpensao)
+    except ValueError:
+        return {"inconsistencias": [{"codigo_inconsistencia": "P003"}]}
+
+    return {
+        "competencia": competencia,
+        "cnpjempregador": cnpjempregador,
+        "cpftrabalhador": cpftrabalhador,
+        "cpfbeneficiario": cpfbeneficiario,
+        "valorpensao": valorpensao,
+        "tipoenvio": tipoenvio,
+        "produto": produto,
+        "plano": plano
+    }
+
+def lambda_handler(event, context):
+    s3 = boto3.client('s3')
+    bucket_name = 'your-bucket-name'
+    output_success = StringIO()
+    output_error = StringIO()
+    error_lines = []
+    success_lines = []
+
+    for record in event['Records']:
+        content = record['body']
+        processed_json = validate_and_process_line(content)
+
+        if 'inconsistencias' in processed_json:
+            error_lines.append(content)
+            output_error.write(json.dumps(processed_json) + '\n')
+        else:
+            success_lines.append(content)
+            output_success.write(json.dumps(processed_json) + '\n')
+
+    # Upload success JSONs
+    s3.put_object(Bucket=bucket_name, Key='success.json', Body=output_success.getvalue())
+
+    # Upload error JSONs
+    s3.put_object(Bucket=bucket_name, Key='error.json', Body=output_error.getvalue())
+
+    # Upload error lines as a separate file
+    if error_lines:
+        error_lines_content = '\n'.join(error_lines)
+        s3.put_object(Bucket=bucket_name, Key='error_lines.txt', Body=error_lines_content)
+
+    # Upload success lines as a separate file
+    if success_lines:
+        success_lines_content = '\n'.join(success_lines)
+        s3.put_object(Bucket=bucket_name, Key='success_lines.txt', Body=success_lines_content)
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Processing completed successfully.')
+    }
